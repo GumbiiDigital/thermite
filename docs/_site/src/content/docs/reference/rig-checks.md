@@ -259,6 +259,7 @@ With `THERMITE_FENCE=seatbelt`, the isolation check runs each probe through the 
 | `write-outside` | Write in the scratch area, outside its folders | `refused` |
 | `write-state` | Write in the state folder | `refused` |
 | `write-own` | Write in its own folder | `ok` |
+| `shared-temp` | Write in the user's shared temporary folder or Metal cache, and read a file another role left there | `refused` |
 | `signal` | Signal a process outside its sandbox | `refused` |
 | `network` | Connect to a listener on `127.0.0.1` | `refused` for the judge's roles, `reachable` for the others |
 | `gpu` | Open the Mac's Metal device | `opened` for `run` and the lane's run on the GPU, `refused` for every other role |
