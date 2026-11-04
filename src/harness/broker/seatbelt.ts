@@ -132,12 +132,14 @@ export function seatbeltProfile(
   const judge = JUDGE_ROLE.test(run.role);
   const ownPaths = [run.cwd, ...run.handed];
   const closed = [places.stateDir, places.scratchDir, ...places.secretDirs].map(sub);
-  // A checker of a baseline job reads and writes the baseline's folder (judge/measure.ts).
+  // A checker's baseline folder (judge/context.ts): a baseline job's, in the job's runs folder,
+  // read and written; or the run's sealed one, under the state's baselines, read only. Never
+  // another place; compared resolved, since the judge may name it by a symlink (/var is /private/var).
   const baseline = /^checker(-[1-7])?$/.test(run.role) ? run.env.THERMITE_BASELINE_DIR : undefined;
-  // Only a folder under the state's baselines (judge/baseline.ts), never another place; compared
-  // resolved, since the judge may name it by a symlink (/var is /private/var).
-  const baselines = join(real(places.stateDir), "baselines");
-  if (baseline && !real(baseline).startsWith(baselines + sep))
+  const at = baseline === undefined ? undefined : real(baseline);
+  const under = (root: string) => at?.startsWith(root + sep) ?? false;
+  const writing = under(join(real(places.scratchDir), "runs"));
+  if (baseline && !writing && !under(join(real(places.stateDir), "baselines")))
     throw new Error(`the Seatbelt fence refuses the baseline folder ${JSON.stringify(baseline)}`);
   const designPaths = baseline ? [baseline] : [];
   const namedFound = judge ? namedPaths(run, places) : [];
@@ -164,7 +166,7 @@ export function seatbeltProfile(
     "(deny file-write*)",
     `(allow file-write* (literal "/dev/null") (literal "/dev/tty") ${sub(places.metalCache)} ${sub(places.userTemp)})`,
     `(deny file-write* ${closed.join(" ")})`,
-    `(allow file-write* ${[...own, ...design].join(" ")})`,
+    `(allow file-write* ${[...own, ...(writing ? design : [])].join(" ")})`,
     ...(judge ? ["(deny network*)"] : []),
     "(deny signal)",
     "(allow signal (target same-sandbox))",

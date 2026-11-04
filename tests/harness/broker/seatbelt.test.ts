@@ -51,17 +51,29 @@ describe("the Seatbelt profile", () => {
     assert.ok(!of("run").includes("/rig/"));
   });
 
-  test("a checker's baseline folder: under the state's baselines, also by a symlink; never elsewhere", () => {
+  test("a checker's baseline folder: a job's in the runs folder, written; a sealed one, read only; also by a symlink; never elsewhere", () => {
     const top = realpathSync(mkdtempSync(join(tmpdir(), "thermite-sb-")));
     mkdirSync(join(top, "state", "baselines", "b1"), { recursive: true });
-    symlinkSync(join(top, "state"), join(top, "link"));
-    const places = { ...PLACES, stateDir: join(top, "state") };
-    const as = (dir: string) =>
-      seatbeltProfile({ ...RUN, role: "checker", env: { THERMITE_BASELINE_DIR: dir } }, places);
-    as(join(top, "state", "baselines", "b1"));
-    as(join(top, "link", "baselines", "b1"));
+    mkdirSync(join(top, "scratch", "runs", "job-1", "baseline"), { recursive: true });
+    symlinkSync(top, join(top, "link"));
+    const places = { ...PLACES, stateDir: join(top, "state"), scratchDir: join(top, "scratch") };
+    const as = (dir: string) => {
+      const { profile, params } = seatbeltProfile(
+        { ...RUN, role: "checker", env: { THERMITE_BASELINE_DIR: dir } },
+        places,
+      );
+      const name = params.find((p) => p.endsWith(`=${realpathSync(dir)}`))?.split("=")[0];
+      assert.ok(name, dir);
+      const write = profile.split("\n").findLast((l) => l.startsWith("(allow file-write*"));
+      return write?.includes(`(param "${name}")`) ? "write" : "read";
+    };
+    assert.equal(as(join(top, "scratch", "runs", "job-1", "baseline")), "write");
+    assert.equal(as(join(top, "link", "scratch", "runs", "job-1", "baseline")), "write");
+    assert.equal(as(join(top, "state", "baselines", "b1")), "read");
+    assert.equal(as(join(top, "link", "state", "baselines", "b1")), "read");
     assert.throws(() => as(join(top, "state", "ledger")), /refuses the baseline folder/);
     assert.throws(() => as(join(top, "state", "baselines")), /refuses the baseline folder/);
+    assert.throws(() => as(join(top, "scratch", "runs")), /refuses the baseline folder/);
   });
 
   test("refuses a path with a quote or a backslash", () => {
