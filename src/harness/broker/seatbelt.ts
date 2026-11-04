@@ -134,12 +134,10 @@ export function seatbeltProfile(
   const closed = [places.stateDir, places.scratchDir, ...places.secretDirs].map(sub);
   // A checker of a baseline job reads and writes the baseline's folder (judge/measure.ts).
   const baseline = /^checker(-[1-7])?$/.test(run.role) ? run.env.THERMITE_BASELINE_DIR : undefined;
-  // Only a folder under the state's baselines (judge/baseline.ts), never another place.
+  // Only a folder under the state's baselines (judge/baseline.ts), never another place; compared
+  // resolved, since the judge may name it by a symlink (/var is /private/var).
   const baselines = join(real(places.stateDir), "baselines");
-  if (
-    baseline &&
-    !(baseline.startsWith(baselines + sep) && real(baseline).startsWith(baselines + sep))
-  )
+  if (baseline && !real(baseline).startsWith(baselines + sep))
     throw new Error(`the Seatbelt fence refuses the baseline folder ${JSON.stringify(baseline)}`);
   const designPaths = baseline ? [baseline] : [];
   const namedFound = judge ? namedPaths(run, places) : [];

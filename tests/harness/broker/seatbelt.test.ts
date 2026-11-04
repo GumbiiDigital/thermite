@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -49,6 +49,19 @@ describe("the Seatbelt profile", () => {
       assert.ok(of(role).includes(noGpu), role);
     // Paths are parameters, never text in the profile.
     assert.ok(!of("run").includes("/rig/"));
+  });
+
+  test("a checker's baseline folder: under the state's baselines, also by a symlink; never elsewhere", () => {
+    const top = realpathSync(mkdtempSync(join(tmpdir(), "thermite-sb-")));
+    mkdirSync(join(top, "state", "baselines", "b1"), { recursive: true });
+    symlinkSync(join(top, "state"), join(top, "link"));
+    const places = { ...PLACES, stateDir: join(top, "state") };
+    const as = (dir: string) =>
+      seatbeltProfile({ ...RUN, role: "checker", env: { THERMITE_BASELINE_DIR: dir } }, places);
+    as(join(top, "state", "baselines", "b1"));
+    as(join(top, "link", "baselines", "b1"));
+    assert.throws(() => as(join(top, "state", "ledger")), /refuses the baseline folder/);
+    assert.throws(() => as(join(top, "state", "baselines")), /refuses the baseline folder/);
   });
 
   test("refuses a path with a quote or a backslash", () => {
