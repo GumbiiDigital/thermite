@@ -9,7 +9,7 @@ import {
 import { HARNESS_INBOX_DIR } from "../../core/paths.ts";
 import { ROUTE_FILE } from "../agents/index.ts";
 import type { ApiTokens } from "../api/index.ts";
-import { BrokerClient, LocalRunner, type Runner } from "../broker/index.ts";
+import { BrokerClient, LocalRunner, type Runner, SeatbeltRunner } from "../broker/index.ts";
 import type { PromotionPolicy } from "../judge/index.ts";
 import type { HarnessPaths } from "../service/index.ts";
 import { harnessNumbers } from "../settings.ts";
@@ -61,9 +61,7 @@ export async function controllerContext(env: NodeJS.ProcessEnv): Promise<Control
     supervisor: env.THERMITE_SUPERVISOR_TOKEN || secretFromFile("THERMITE_SUPERVISOR_TOKEN_FILE"),
     proposer: env.THERMITE_PROPOSER_TOKEN || optionalSecretFromFile("THERMITE_PROPOSER_TOKEN_FILE"),
   };
-  const runner: Runner = env.THERMITE_BROKER_SOCKET
-    ? new BrokerClient(env.THERMITE_BROKER_SOCKET)
-    : new LocalRunner(paths.scratchDir);
+  const runner = chooseRunner(env, paths);
   return {
     env,
     numbers,
@@ -74,6 +72,25 @@ export async function controllerContext(env: NodeJS.ProcessEnv): Promise<Control
     runner,
     routeFile: join(paths.stateDir, ROUTE_FILE),
   };
+}
+
+/**
+ * The runner: the broker's, where it runs the roles as their users; else, on a Mac with
+ * THERMITE_FENCE=seatbelt, each run in its Seatbelt fence (broker/seatbelt.ts); else every role
+ * as the current user, without separation (local development).
+ */
+function chooseRunner(
+  env: NodeJS.ProcessEnv,
+  paths: { stateDir: string; scratchDir: string },
+): Runner {
+  const fence = env.THERMITE_FENCE ?? "";
+  if (fence !== "" && fence !== "seatbelt")
+    throw new Error(`THERMITE_FENCE must be seatbelt or not set, not ${fence}`);
+  if (fence && env.THERMITE_BROKER_SOCKET)
+    throw new Error("THERMITE_FENCE=seatbelt is for a Mac without the broker; unset one of them");
+  if (env.THERMITE_BROKER_SOCKET) return new BrokerClient(env.THERMITE_BROKER_SOCKET);
+  if (fence) return new SeatbeltRunner({ ...paths, env });
+  return new LocalRunner(paths.scratchDir);
 }
 
 /**

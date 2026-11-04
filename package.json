@@ -45,6 +45,7 @@
     "acceptance:judge": "node scripts/acceptance/judge.mjs",
     "acceptance:leaf": "node scripts/acceptance/leaf.mjs",
     "acceptance:machine": "node scripts/acceptance/machine.mjs",
+    "acceptance:metal": "node scripts/acceptance/metal.mjs",
     "acceptance:multigpu": "node scripts/acceptance/multigpu.mjs",
     "acceptance:quick-start": "node scripts/acceptance/quick-start.mjs",
     "acceptance:research-longrun": "node scripts/acceptance/research-longrun.mjs",

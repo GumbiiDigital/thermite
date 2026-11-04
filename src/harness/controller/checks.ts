@@ -8,6 +8,7 @@ import {
   oneContainerTargets,
   readSupervisorIsolation,
   rigSecretFiles,
+  seatbeltSelftest,
 } from "../selftest/index.ts";
 import type { HarnessService } from "../service/index.ts";
 import { checksDir, smokeCheck } from "../smoke-check.ts";
@@ -21,9 +22,19 @@ import type { ControllerContext } from "./context.ts";
  * route's check and the smoke check (once the API serves).
  */
 
-/** The isolation selftest, under the broker only. */
+/** The isolation selftest, under the broker or in the Seatbelt fence on a Mac. */
 export function addIsolationCheck(ctx: ControllerContext, service: HarnessService): void {
   const { env, paths } = ctx;
+  if (ctx.runner.fence === "seatbelt") {
+    const { runner } = ctx;
+    service.rigChecks.isolation = {
+      run: async () => {
+        const report = await seatbeltSelftest({ runner, ...paths });
+        return { ok: report.ok, summary: isolationSummary(report), detail: { ...report } };
+      },
+    };
+    return;
+  }
   if (env.THERMITE_BROKER_SOCKET) {
     const socketPath = env.THERMITE_BROKER_SOCKET;
     service.rigChecks.isolation = {

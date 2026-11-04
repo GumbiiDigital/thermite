@@ -1,7 +1,7 @@
 /**
  * The harness broker, as the rest of the harness uses it: the roles and the runner that runs work
  * as their users (runner.ts, client.ts), the GPU's device nodes (devices.ts), supervised processes
- * (process.ts) and a kit's driver run beside the candidate (pair.ts), the one-container rig (one-container.ts), and the state snapshot (seal.ts,
+ * (process.ts) and a kit's driver run beside the candidate (pair.ts), the one-container rig (one-container.ts), the macOS fence (seatbelt.ts), and the state snapshot (seal.ts,
  * snapshot/). The broker's entry is main.ts; this file is only the folder's interface.
  */
 
@@ -42,6 +42,7 @@ export {
   walk,
 } from "./runner.ts";
 export { SNAPSHOT_KEY_VAR } from "./seal.ts";
+export { SeatbeltRunner } from "./seatbelt.ts";
 export {
   inspectSnapshotFolder,
   lookWords,

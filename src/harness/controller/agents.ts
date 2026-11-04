@@ -64,7 +64,8 @@ export function agentParts(
     runner,
     ledger,
     scratchDir: paths.scratchDir,
-    gpu: driver.type === "cuda-gpu",
+    // A lane's dev runs reach the device on a GPU target: CUDA's cards or the Mac's GPU.
+    gpu: driver.type === "cuda-gpu" || driver.type === "metal-gpu",
     dedicated: devCard?.layout !== undefined,
     cards: devCards.length || undefined,
     unavailable: devCard?.error,

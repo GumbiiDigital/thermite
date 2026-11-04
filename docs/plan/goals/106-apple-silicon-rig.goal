@@ -38,11 +38,14 @@ None yet.
 ## Open questions
 
 - Which macOS mechanism can fence the agents as strictly as Linux users, groups and Landlock do, and whether it can be tested in CI.
+  - Answer (2026-11-04, prototype): Seatbelt, one profile per run made from its role and the folders handed to it (`src/harness/broker/seatbelt.ts`). It keeps the Linux promises for files, network, signals and the GPU (`AGXDeviceUserClient`), and the macOS isolation self-test proves each one as each role (`src/harness/selftest/seatbelt.ts`). It has two gaps: no per-run process limit and no CPU pinning. All roles share one user, so the fence rests on Seatbelt alone; separate macOS users would need root once. `sandbox-exec` is marked deprecated, though current macOS still runs it. CI: GitHub's macOS runners could run the fence's tests and the self-test; their GPU is virtual, so the Metal smoke check may not run there. Not tried.
 - Whether the judge on a native Mac rig should time with the GPU idle for the agents, or keep its own measurement windows.
+  - Answer (2026-11-04, prototype): with the GPU idle, as a rig with one shared GPU does. The `metal-gpu` driver refuses to time while the GPU's utilization is above 5% or macOS reports a thermal or performance warning, and the lanes' development runs take turns with the judge.
 
 ## Progress
 
 - 2026-10-23: Goal written as a plan, from the owner's words.
+- 2026-11-04: A prototype of the judge on a Mac's GPU, natively, with no container, VM or root: the `metal-gpu` target driver (`src/harness/targets/metal.ts`), the Seatbelt fence (`THERMITE_FENCE=seatbelt`), the macOS isolation self-test, the Metal smoke kit (`kits/smoke-metal`, `examples/smoke-metal-project`) and the Metal acceptance (`npm run acceptance:metal`). Not built: setup from the install or Add a rig, a rig of control's on a Mac, and an MLX kit.
 
 ---
 

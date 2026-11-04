@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "name": "smoke-metal",
+  "target": "metal-gpu",
+  "build": {
+    "copy": [
+      "bench"
+    ],
+    "command": [
+      "sh",
+      ".kit/bench/build.sh"
+    ],
+    "outputs": [
+      "out/bench"
+    ],
+    "timeout_s": 300,
+    "rss_mib": 2048,
+    "disk_mib": 512
+  },
+  "cells": {
+    "small": {
+      "n": 512,
+      "reps": 1000,
+      "seed": 11,
+      "work": 268435456000
+    },
+    "large": {
+      "n": 1024,
+      "reps": 150,
+      "seed": 23,
+      "work": 322122547200
+    },
+    "held": {
+      "n": 768,
+      "reps": 300,
+      "seed": 37,
+      "work": 271790899200
+    }
+  },
+  "run": {
+    "command": [
+      "{build:out/bench}",
+      "{params}",
+      "{out}"
+    ],
+    "timeout_s": 120,
+    "rss_mib": 2048,
+    "disk_mib": 64
+  },
+  "metrics": {
+    "flops_per_s": {
+      "unit": "FLOP/s",
+      "work": "work"
+    }
+  },
+  "check": {
+    "command": [
+      "node",
+      "{kit:check.mjs}",
+      "{params_json}",
+      "{out}"
+    ],
+    "timeout_s": 300
+  }
+}

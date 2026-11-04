@@ -5,7 +5,7 @@ import type { RoleRunner } from "../../agents/runner.ts";
 import { MAX_LANES } from "../../core/contract.ts";
 import { MAX_RUN_MS } from "../../core/kit.ts";
 import { type PairOutcome, runPairSupervised } from "./pair.ts";
-import { killScope, runSupervised, type SupervisedResult } from "./process.ts";
+import { killScope, runSupervised, type SupervisedResult, type SupervisedRun } from "./process.ts";
 
 /**
  * Roles and the runner interface. Inside the harness container the broker (root) runs each
@@ -160,6 +160,11 @@ export type RunOutcome = SupervisedResult;
 export interface Runner extends RoleRunner {
   /** True when roles really run as separate users. */
   readonly separated: boolean;
+  /**
+   * The fence each run starts in, where it is not separate users: "seatbelt" on macOS
+   * (seatbelt.ts). Unset: no fence of its own (the broker's users, or none in local development).
+   */
+  readonly fence?: "seatbelt" | undefined;
   run(req: RunRequest): Promise<RunOutcome>;
   /**
    * Gives a directory under scratch to a role (it may then write there). With `harnessReads`, the
@@ -215,8 +220,11 @@ export class LocalRunner implements Runner {
     this.scratchDir = scratchDir;
   }
 
-  /** A run's supervision here: the request's command and limits, as the current user. */
-  private spec(input: RunRequest) {
+  /**
+   * A run's supervision here: the request's command and limits, as the current user. The Seatbelt
+   * runner (seatbelt.ts) wraps it in the run's fence.
+   */
+  protected spec(input: RunRequest): SupervisedRun {
     const req = RunRequest.parse(input);
     insideRoot(this.scratchDir, req.cwd);
     const keep = req.keepBackground === true && /^lane-\d+$/.test(req.role) && !req.gpu;

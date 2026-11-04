@@ -29,6 +29,19 @@ interface Candidate {
   accept?: string[];
 }
 
+/** Each target type's smoke kit, and each kit's project in examples/. */
+type SmokeKit = "smoke-cpu" | "smoke-cuda" | "smoke-metal";
+const SMOKE_KITS = new Map<string, SmokeKit>([
+  ["cpu", "smoke-cpu"],
+  ["cuda-gpu", "smoke-cuda"],
+  ["metal-gpu", "smoke-metal"],
+]);
+const SMOKE_PROJECTS: Record<SmokeKit, string> = {
+  "smoke-cpu": "smoke-project",
+  "smoke-cuda": "smoke-cuda-project",
+  "smoke-metal": "smoke-metal-project",
+};
+
 /** The same files always make the same commit, so repeated smokes reuse their repositories. */
 const FIXED = {
   GIT_AUTHOR_NAME: "thermite",
@@ -64,15 +77,11 @@ async function seedRepo(from: string, to: string, skip: string[]): Promise<strin
  */
 export async function seedSmokeRepos(
   checksDir: string,
-  kitName: "smoke-cpu" | "smoke-cuda",
+  kitName: SmokeKit,
   work: string,
 ): Promise<{ projectRepo: string; project: string; kitRepo: string; kit: string }> {
   const kitDir = join(checksDir, "kits", kitName);
-  const projectDir = join(
-    checksDir,
-    "examples",
-    kitName === "smoke-cuda" ? "smoke-cuda-project" : "smoke-project",
-  );
+  const projectDir = join(checksDir, "examples", SMOKE_PROJECTS[kitName]);
   const project = await seedRepo(projectDir, join(work, "project"), []);
   const kit = await seedRepo(kitDir, join(work, "kit"), ["candidates"]);
   return { projectRepo: `${kitName}-project`, project, kitRepo: `${kitName}-kit`, kit };
@@ -89,8 +98,7 @@ export async function smokeCheck(o: {
   pollMs?: number | undefined;
   timeoutMs?: number | undefined;
 }): Promise<RigCheckReport> {
-  const kitName =
-    o.targetType === "cuda-gpu" ? "smoke-cuda" : o.targetType === "cpu" ? "smoke-cpu" : undefined;
+  const kitName = SMOKE_KITS.get(o.targetType);
   if (!kitName) return { ok: false, summary: `there is no smoke kit for a ${o.targetType} target` };
   const kitDir = join(o.checksDir, "kits", kitName);
   if (!existsSync(join(kitDir, "kit.json")))
@@ -128,7 +136,13 @@ export async function smokeCheck(o: {
     kit: { repo: kitRepo, commit: kit },
   };
   contract.target = { type: o.targetType, class: o.targetClass };
-  if (kitName === "smoke-cuda") contract.editable_paths = ["src/kernel/**"];
+  if (kitName !== "smoke-cpu") contract.editable_paths = ["src/kernel/**"];
+  // The Metal kit's probe calls the reference by this name (Apple's linker has no --wrap).
+  if (kitName === "smoke-metal")
+    contract.forbidden_patterns = [
+      ...((contract.forbidden_patterns as string[] | undefined) ?? []),
+      "thermite_real_",
+    ];
 
   const runId = `check-smoke-${randomUUID().replace(/-/g, "").slice(0, 8)}`;
   // Assigning pauses the rig's other runs; the ones running now are resumed afterwards.

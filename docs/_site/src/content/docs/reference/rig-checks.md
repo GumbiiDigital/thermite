@@ -94,6 +94,8 @@ thermite selftest isolation --force
 
 It prints the whole report as JSON and exits with 1 when isolation does not hold. Each probe stops every process of its role's user, so without `--force` it refuses a busy rig with `the rig is busy: <reason>; rerun with --force to probe anyway`. The rig is busy while trials or judge jobs are open (`<n> open trial(s) and <m> judge job(s): …`), or while a process of the `planner` or `model-check` user runs (`a planner call is running: wait for it to end (each probe kills its role's processes)`, and the same for `a model check`). The check from control waits the same way: control says `not now:` and the reason.
 
+On a Mac whose harness runs natively in the Seatbelt fence (`THERMITE_FENCE=seatbelt`), the check is the macOS isolation selftest instead: see [On a Mac](#on-a-mac).
+
 ### Roles probed
 
 | Role | Who it is |
@@ -245,11 +247,29 @@ Each probe's result is the error the operation met (refused, as it must be), `re
 
 The details hold every probe's result for every role, the container's checks, and the probes that were skipped.
 
+### On a Mac
+
+With `THERMITE_FENCE=seatbelt`, the isolation check runs each probe through the Seatbelt fence ([On a Mac](../explanation/isolation.md#on-a-mac)), as `builder`, `run`, `checker`, `driver`, `lane-1`, `lane-1` with a development run on the GPU, `agent-1` and `planner`. It first builds a small Metal probe with `clang`. The check needs no idle rig: no probe stops a role's processes.
+
+| Probe | What it tries | Must be |
+| --- | --- | --- |
+| `read-state` | Read a file in the state folder | `refused` |
+| `read-other-role` | Read a file in a folder handed to another role, named in its command | `refused` |
+| `read-kit` | Read a kit's file where the judge keeps kits, by its path | `readable` for the checker, `refused` for every other role |
+| `write-outside` | Write in the scratch area, outside its folders | `refused` |
+| `write-state` | Write in the state folder | `refused` |
+| `write-own` | Write in its own folder | `ok` |
+| `signal` | Signal a process outside its sandbox | `refused` |
+| `network` | Connect to a listener on `127.0.0.1` | `refused` for the judge's roles, `reachable` for the others |
+| `gpu` | Open the Mac's Metal device | `opened` for `run` and the lane's run on the GPU, `refused` for every other role |
+
+A result that starts with `ALLOWED`, `UNREADABLE`, `UNREACHABLE`, `OPENED`, `MISSING` or `failed` fails the check. The report lists the fence's two gaps, a per-run process limit and CPU pinning, under `skipped`.
+
 ## Smoke check
 
 The smoke check runs a small campaign with no agents on the rig's own target. The changes it submits, called candidates, each have a known right verdict. It passes when every candidate gets it, with one exception: [noisy timing](#noisy-timing).
 
-1. It picks the smoke kit for the rig's target: `smoke-cpu` for `cpu`, `smoke-cuda` for `cuda-gpu`. It reads the kits and their projects from `/opt/thermite/checks` in the harness image, or from `THERMITE_CHECKS_DIR`. In the image, only the harness's controller may read that folder; the isolation check makes sure every role is refused it (`image-checks-list`, `image-kit-read`).
+1. It picks the smoke kit for the rig's target: `smoke-cpu` for `cpu`, `smoke-cuda` for `cuda-gpu`, `smoke-metal` for `metal-gpu`. It reads the kits and their projects from `/opt/thermite/checks` in the harness image, or from `THERMITE_CHECKS_DIR`. In the image, only the harness's controller may read that folder; the isolation check makes sure every role is refused it (`image-checks-list`, `image-kit-read`).
 2. It makes a git repository of the project and one of the kit (without its candidates), with fixed dates, so the same files always give the same commits.
 3. It assigns a judge-only run named `check-smoke-` and eight hexadecimal digits, of a campaign named `rig-check-<kit>-` and the first eight digits of the kit's commit. The contract is the image's `examples/contracts/smoke-cpu.json`, with the rig's target. Assigning pauses the rig's running runs, with the reason `replaced by check-smoke-…`.
 4. It submits every candidate except `good`, and waits until each is settled: `judged`, `rejected_v0`, `duplicate`, `promoted`, `awaiting_approval` or `errored`.
@@ -286,20 +306,29 @@ Every candidate is judged against the seed, the project as it is. The run is a h
 | `broken` | Skips half of the sum | `invalid` |
 | `fallback` | Calls the reference code | `invalid` |
 
+### The Metal candidates
+
+| Candidate | The change | Expected |
+| --- | --- | --- |
+| `good` | Threadgroup tiling: tiles of 64 × 8 and 8 × 64 in threadgroup memory, and a 4 × 4 block of outputs for each thread | `win_confirmed` |
+| `noop` | A renamed variable | `neutral` |
+| `broken` | Skips half of the sum | `invalid` |
+| `fallback` | Calls the reference code | `invalid` |
+
 ### The smoke kits and contract
 
-Both kits multiply two square matrices of floats, many times over (`reps`), so that the work takes much longer than starting the process. The build links the candidate's kernel with the kit's driver and wraps the reference function, so the kit can see whether the candidate called it. The kit's check computes the product again in double precision (the CUDA kit checks 64 evenly spaced rows, since its matrices are larger), allows an error of at most 0.002, and fails a run with values that are not numbers or that called the reference.
+Each kit multiplies two square matrices of floats, many times over (`reps`), so that the work takes much longer than starting the process. The build links the candidate's kernel with the kit's driver and wraps the reference function, so the kit can see whether the candidate called it. Apple's linker has no `--wrap`, so the Metal kit's build compiles the reference under another name (`thermite_real_matmul_ref`), and the kit's own `matmul_ref` counts each call and passes it on. The kit's check computes the product again in double precision (the GPU kits check 64 evenly spaced rows, since their matrices are larger), allows an error of at most 0.002, and fails a run with values that are not numbers or that called the reference.
 
-| | `smoke-cpu` | `smoke-cuda` |
-| --- | --- | --- |
-| Cases (`n`) | `small` 128, `large` 256, `held` 192 | `small` 512, `large` 1024, `held` 768 |
-| Metric | `flops_per_s` (FLOP/s) | `flops_per_s` (FLOP/s) |
-| Build limits | 120 s, 1024 MiB memory, 256 MiB disk | 300 s, 2048 MiB memory, 512 MiB disk |
-| Run limits | 60 s, 256 MiB memory, 32 MiB disk | 120 s, 2048 MiB memory, 64 MiB disk |
-| Check time limit | 60 s | 300 s |
-| Compiler | `cc` | `nvcc`, with native code for each GPU generation its CUDA builds for, and PTX for newer GPUs, so a run on one of those generations does not compile the kernel at start: with CUDA 12, `sm_60`, `sm_70`, `sm_75`, `sm_80`, `sm_86`, `sm_89` and `sm_90`; with CUDA 13, `sm_75`, `sm_80`, `sm_86`, `sm_89`, `sm_90`, `sm_100` and `sm_120`, whose code also runs on the DGX Spark's `sm_121`. Its build script, run by hand with `CUDA_ARCH` set, such as `sm_86`, builds for that architecture only; the judge's builds don't set it |
+| | `smoke-cpu` | `smoke-cuda` | `smoke-metal` |
+| --- | --- | --- | --- |
+| Cases (`n`) | `small` 128, `large` 256, `held` 192 | `small` 512, `large` 1024, `held` 768 | as `smoke-cuda`, with the same inputs |
+| Metric | `flops_per_s` (FLOP/s) | `flops_per_s` (FLOP/s) | `flops_per_s` (FLOP/s) |
+| Build limits | 120 s, 1024 MiB memory, 256 MiB disk | 300 s, 2048 MiB memory, 512 MiB disk | as `smoke-cuda` |
+| Run limits | 60 s, 256 MiB memory, 32 MiB disk | 120 s, 2048 MiB memory, 64 MiB disk | as `smoke-cuda` |
+| Check time limit | 60 s | 300 s | 300 s |
+| Compiler | `cc` | `nvcc`, with native code for each GPU generation its CUDA builds for, and PTX for newer GPUs, so a run on one of those generations does not compile the kernel at start: with CUDA 12, `sm_60`, `sm_70`, `sm_75`, `sm_80`, `sm_86`, `sm_89` and `sm_90`; with CUDA 13, `sm_75`, `sm_80`, `sm_86`, `sm_89`, `sm_90`, `sm_100` and `sm_120`, whose code also runs on the DGX Spark's `sm_121`. Its build script, run by hand with `CUDA_ARCH` set, such as `sm_86`, builds for that architecture only; the judge's builds don't set it | `clang` from Xcode or the Command Line Tools, with Objective-C. Each kernel is Metal Shading Language source that the program compiles when it starts (`newLibraryWithSource`), so no Metal toolchain is needed. The judge builds with no environment but `PATH`, and on some Macs clang's default SDK does not link there, so the build tries clang's default, then the SDK `xcrun` names, then Xcode's own |
 
-The contract measures `small` and `large`, keeps `held` for confirmation, and lets changes touch only `src/kernel/**`. It sets `min_effect` 0.1, `equivalence_band` 0.05 and `runs_per_cell` 3, because timing on a shared CPU is noisy. Its audit triggers are set to 1000, so no smoke candidate is audited. It forbids added lines that match `clock_gettime`, `gettimeofday`, `\brdtsc`, `\btimes\s*\(`, `__real_`, `__wrap_` and `thermite_ref_calls`.
+The contract measures `small` and `large`, keeps `held` for confirmation, and lets changes touch only `src/kernel/**`. It sets `min_effect` 0.1, `equivalence_band` 0.05 and `runs_per_cell` 3, because timing on a shared CPU is noisy. Its audit triggers are set to 1000, so no smoke candidate is audited. It forbids added lines that match `clock_gettime`, `gettimeofday`, `\brdtsc`, `\btimes\s*\(`, `__real_`, `__wrap_` and `thermite_ref_calls`, and on the Metal kit `thermite_real_` too.
 
 ### Results
 
@@ -308,7 +337,7 @@ The contract measures `small` and `large`, keeps `held` for confirmation, and le
 | `smoke on <kit>: all <n> candidates were judged as expected (run <run>)` | Passed |
 | `smoke on <kit>: <n-1> of <n> candidates were judged as expected; the no-op came out inconclusive, not neutral (run <run>). Note: The timing on this machine is noisy. Results here need more repeats.` | Passed, with a note: see [Noisy timing](#noisy-timing) |
 | `smoke on <kit>: <k> of <n> candidates were judged otherwise: <name> expected <x>, got <y>; …` | Failed. Each wrong candidate is listed |
-| `there is no smoke kit for a <type> target` | The rig's target is neither `cpu` nor `cuda-gpu` |
+| `there is no smoke kit for a <type> target` | The rig's target is not `cpu`, `cuda-gpu` or `metal-gpu` |
 | `the smoke kit is not in this image (<dir>)` | The image has no smoke kit at that path |
 | `the judge did not settle <names> within 180 min` | The 3-hour limit passed |
 

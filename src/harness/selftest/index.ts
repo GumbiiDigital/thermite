@@ -57,6 +57,7 @@ export {
   supervisorUserCheck,
 } from "./container.ts";
 export { deviceProbes, isFailure, PROBE, type Probe } from "./probes.ts";
+export { SEATBELT_GAPS, seatbeltSelftest } from "./seatbelt.ts";
 export {
   keepSupervisorIsolation,
   readSupervisorIsolation,

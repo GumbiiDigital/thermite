@@ -11,7 +11,14 @@ import {
 } from "../broker/index.ts";
 import { collectHardware } from "../hardware.ts";
 import type { HarnessService } from "../service/index.ts";
-import { CpuDriver, CudaDriver, smiAs, smiAsRun, type TargetDriver } from "../targets/index.ts";
+import {
+  CpuDriver,
+  CudaDriver,
+  MetalDriver,
+  smiAs,
+  smiAsRun,
+  type TargetDriver,
+} from "../targets/index.ts";
 import type { ControllerContext } from "./context.ts";
 
 /**
@@ -76,7 +83,14 @@ export function targetDrivers(ctx: ControllerContext): Targets {
           unusable: devCard?.error,
         }),
     );
-  } else throw new Error(`no target driver ${target}; this build has cpu and cuda-gpu`);
+  } else if (target === "metal-gpu") {
+    // Metal's GPU is the Mac's own: the harness runs natively on macOS, with no broker.
+    if (process.platform !== "darwin" || process.arch !== "arm64")
+      throw new Error(
+        `THERMITE_TARGET=metal-gpu needs a Mac with Apple silicon (macOS on arm64); this is ${process.platform} on ${process.arch}`,
+      );
+    drivers = [new MetalDriver({ targetClass: env.THERMITE_TARGET_CLASS ?? "metal-gpu" })];
+  } else throw new Error(`no target driver ${target}; this build has cpu, cuda-gpu and metal-gpu`);
   const driver = drivers[0] as TargetDriver;
   return { devCard, judgeCards, devCards, drivers, driver };
 }

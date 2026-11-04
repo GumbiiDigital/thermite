@@ -122,3 +122,24 @@ For each kind of role, the self-test asks the broker to run a small probe as tha
 The supervisor keeps its advisors' programs apart the same way: each runs as an advisor user of its own, which must not read the supervisor's tokens, keys or state, its inbox or its results. The supervisor probes that as one of those users at its start and before each isolation check, and the check shows what it found as its supervisor's part ([The supervisor's part](../reference/rig-checks.md#the-supervisors-part)).
 
 The result is one sentence, `isolation holds: every probe of <n> roles came out as it must` or `isolation does NOT hold` with what got through. Each probe stops its role's processes, so the test wants an idle rig. The [rig checks reference](../reference/rig-checks.md#isolation-check) lists every probe.
+
+## On a Mac
+
+A Mac with Apple silicon can judge on its own GPU, through Metal, with the harness started natively: no container, no virtual machine and no root. This is a prototype, set up by hand ([goal 106](https://github.com/iammrduncan/thermite/blob/main/docs/plan/goals/106-apple-silicon-rig.goal)). There is no broker and only one user, so the roles are kept apart by macOS's own sandbox, Seatbelt, which the harness chooses with `THERMITE_FENCE=seatbelt`. Every run starts under `sandbox-exec` with a profile made for that run from its role and the folders handed to the role. The profile holds for every process the run starts, and none of them can lift it.
+
+| Promise on Linux | On a Mac, in the Seatbelt profile |
+| --- | --- |
+| A role reads only its own folders, never the ledger, the kits or a secret | Reading the state folder, the scratch area, the secrets' folders and the home is denied; then the run's own folder, the folders handed to its role, and what its role reads by design (a build or a kit its command names, a checker's baseline) are allowed. A folder handed to another role is never allowed |
+| A role writes only its own folders | Writing is denied everywhere but the run's own folder, the folders handed to its role, `/dev/null`, `/dev/tty`, and the user's Metal cache and temporary folder |
+| The judge's roles have no network | The builder, timing, checker and driver roles get no network on every card; the lanes, agents, planner and model check keep it, to reach the model and the harness |
+| A role can't signal or watch another | Signals and process information don't leave the run's own sandbox |
+| Only the timing users and a lane's development runs open the GPU | Every other role is refused Metal's device (`AGXDeviceUserClient`) |
+
+In Seatbelt's rules the last one that matches wins, so each part of a profile denies broadly and then allows what the run needs; a test checks this on a Mac. The macOS isolation self-test probes each promise as each role, and fails when one does not hold.
+
+Two promises have no macOS form, and the self-test lists them as not checked:
+
+- **No per-run process limit.** macOS has no `prlimit` for another process, and its process limit counts the whole user.
+- **No CPU pinning.** macOS has no CPU affinity, so timed runs are not pinned to CPUs.
+
+Apple silicon has one GPU, shared with the display. The judge and the lanes' development runs take turns on it, as on a rig with one shared card ([Sharing a device](sharing-a-device.md)), and the judge times only while the GPU is idle.

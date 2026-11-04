@@ -404,7 +404,7 @@ function gpuFindings(p: Probes, m: MachineFacts): Finding[] {
   const toolkit = "GPU container toolkit";
   if (m.platform !== "linux" || !m.nvidia.present) {
     const said = m.appleSilicon
-      ? "Thermite uses NVIDIA GPUs on Linux only: containers on a Mac can't reach its Apple GPU. A CPU rig needs no GPU driver."
+      ? "Thermite's containers use NVIDIA GPUs on Linux only: containers on a Mac can't reach its Apple GPU. A native Mac rig can judge on Metal (a prototype, set up by hand). A CPU rig needs no GPU driver."
       : m.platform === "darwin"
         ? "Thermite uses NVIDIA GPUs on Linux only. A CPU rig needs no GPU driver."
         : m.amd.count
