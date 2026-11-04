@@ -160,7 +160,8 @@ try {
     );
     // As the smoke check (smokeReport): when the no-op's inconclusive is the only miss, the
     // machine's timing is noisy, and the no-op passes with that note.
-    const noisy = smoke.detail?.noisy_timing === true && name === "noop" && !c.ok;
+    const noisy =
+      smoke.detail?.noisy_timing === true && name === "noop" && c.got === "inconclusive";
     check(
       `candidate ${name}`,
       c.ok || noisy,
