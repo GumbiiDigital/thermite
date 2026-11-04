@@ -76,6 +76,63 @@ describe("the Seatbelt profile", () => {
     assert.throws(() => as(join(top, "scratch", "runs")), /refuses the baseline folder/);
   });
 
+  test("a judge's command opens a build in the state, never a file in a secret's folder, the home or a shared folder", () => {
+    const top = realpathSync(mkdtempSync(join(tmpdir(), "thermite-sb-")));
+    const at = (...p: string[]) => join(top, ...p);
+    for (const d of ["home/state/builds/b1", "secrets", "temp", "cache/com.apple.metal"])
+      mkdirSync(at(d), { recursive: true });
+    for (const f of ["secrets/key", "home/notes.txt", "temp/left", "cache/com.apple.metal/x"])
+      writeFileSync(at(f), "x\n");
+    // The state inside the home: its builds stay open.
+    const places: FencePlaces = {
+      ...PLACES,
+      stateDir: at("home", "state"),
+      secretDirs: [at("secrets")],
+      home: at("home"),
+      userTemp: at("temp"),
+      metalCache: at("cache", "com.apple.metal"),
+    };
+    const argv = [
+      "/bin/cat",
+      at("secrets", "key"),
+      at("home", "notes.txt"),
+      at("temp", "left"),
+      at("cache", "com.apple.metal", "x"),
+      at("home", "state", "builds", "b1"),
+    ];
+    const { profile, params } = seatbeltProfile({ ...RUN, role: "run", argv }, places);
+    const opened = (path: string) => {
+      const name = params.find((p) => p.endsWith(`=${path}`))?.split("=")[0];
+      const allow = profile.split("\n").findLast((l) => l.startsWith("(allow file-read* "));
+      return name !== undefined && (allow?.includes(`(param "${name}")`) ?? false);
+    };
+    assert.equal(opened(at("secrets", "key")), false, "a secret");
+    assert.equal(opened(at("home", "notes.txt")), false, "a file in the home");
+    assert.equal(opened(at("temp", "left")), false, "the shared temporary folder");
+    assert.equal(opened(at("cache", "com.apple.metal", "x")), false, "the Metal cache");
+    assert.equal(opened(at("home", "state", "builds", "b1")), true, "a build in the state");
+  });
+
+  test("every role is closed out of the user's shared temporary folder and Metal cache", () => {
+    for (const role of ["run", "checker", "lane-1", "agent-1"]) {
+      const { profile, params } = seatbeltProfile({ ...RUN, role }, PLACES);
+      const name = (path: string) => params.find((p) => p.endsWith(`=${path}`))?.split("=")[0];
+      for (const path of [PLACES.userTemp, PLACES.metalCache]) {
+        const ref = `(param "${name(path)}")`;
+        const lines = profile.split("\n");
+        assert.ok(
+          lines.some((l) => l.startsWith("(deny file-read*") && l.includes(ref)),
+          `${role} reads ${path}`,
+        );
+        assert.ok(
+          lines.some((l) => l.startsWith("(deny file-write*") && l.includes(ref)),
+          `${role} writes ${path}`,
+        );
+        assert.ok(!lines.some((l) => l.startsWith("(allow") && l.includes(ref)), role);
+      }
+    }
+  });
+
   test("refuses a path with a quote or a backslash", () => {
     assert.throws(
       () => seatbeltProfile({ ...RUN, role: "run", cwd: '/rig/scratch/a"b' }, PLACES),
@@ -138,10 +195,12 @@ describe("Seatbelt on this Mac", () => {
       assert.equal(runner.fence, "seatbelt");
       assert.equal(runner.separated, false);
       const mine = join(scratchDir, "mine");
-      const theirs = join(scratchDir, "theirs");
+      // In the judge's runs folder, where a run's copy of the kit lies.
+      const theirs = join(scratchDir, "runs", "theirs");
       mkdirSync(mine);
-      mkdirSync(theirs);
+      mkdirSync(theirs, { recursive: true });
       writeFileSync(join(theirs, "x.txt"), "theirs\n");
+      writeFileSync(join(scratchDir, "loose.txt"), "the scratch area\n");
       await runner.handOver(mine, "run");
       await runner.handOver(theirs, "lane-1");
       const cat = async (file: string) =>
@@ -153,6 +212,11 @@ describe("Seatbelt on this Mac", () => {
       // Taken back from the lane, the folder is no other role's: a run that names it may read it.
       await runner.reclaim(theirs);
       assert.equal(await cat(join(theirs, "x.txt")), 0);
+      assert.notEqual(
+        await cat(join(scratchDir, "loose.txt")),
+        0,
+        "the scratch area, though named",
+      );
       const write = await runner.run({
         role: "run",
         argv: ["/bin/sh", "-c", 'echo x > "$0"', join(scratchDir, "outside.txt")],
@@ -160,7 +224,10 @@ describe("Seatbelt on this Mac", () => {
         timeoutMs: 20_000,
       });
       assert.notEqual(write.exitCode, 0, "a write outside its folders");
-      assert.match(execFileSync("/bin/ls", [scratchDir], { encoding: "utf8" }), /^mine\ntheirs\n$/);
+      assert.match(
+        execFileSync("/bin/ls", [scratchDir], { encoding: "utf8" }),
+        /^loose\.txt\nmine\nruns\n$/,
+      );
     },
   );
 

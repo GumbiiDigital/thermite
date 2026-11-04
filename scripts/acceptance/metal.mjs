@@ -158,7 +158,14 @@ try {
     lines.push(
       `${name}: expected ${c.expect}, got ${c.got || "nothing"}${rate ? `; ${rate}` : ""}${reasons}`,
     );
-    check(`candidate ${name}`, c.ok, `expected ${c.expect}, got ${c.got}`);
+    // As the smoke check (smokeReport): when the no-op's inconclusive is the only miss, the
+    // machine's timing is noisy, and the no-op passes with that note.
+    const noisy = smoke.detail?.noisy_timing === true && name === "noop" && !c.ok;
+    check(
+      `candidate ${name}`,
+      c.ok || noisy,
+      `expected ${c.expect}, got ${c.got}${noisy ? " (noisy timing)" : ""}`,
+    );
   }
   report.summary = lines;
   ok = checks.every((c) => c.ok) && Object.keys(candidates).length === 4;

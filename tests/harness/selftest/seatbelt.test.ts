@@ -46,6 +46,7 @@ describe("the macOS isolation selftest", () => {
         assert.equal(probes["read-state"], "refused");
         assert.equal(probes["read-other-role"], "refused");
         assert.equal(probes.signal, "refused");
+        assert.equal(probes["shared-temp"], "refused");
       }
       assert.deepEqual(report.skipped, SEATBELT_GAPS);
       assert.match(isolationSummary(report), /^isolation holds/);

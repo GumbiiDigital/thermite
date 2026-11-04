@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -11,8 +11,9 @@ import { isFailure } from "./probes.ts";
  * The macOS isolation selftest, for a rig whose runs start in the Seatbelt fence
  * (broker/seatbelt.ts). Through the runner, as each role, it tries to read a file in the state
  * folder, a file in a folder handed to another role (named in its command), and a kit, which only
- * the checkers may read; to write outside its own folders; to signal a process outside its
- * sandbox; for the judge's roles, to connect to a local listener; and to open the Mac's GPU, which
+ * the checkers may read; to write outside its own folders; to leave a file for another role in
+ * the user's shared temporary folder or Metal cache, and to read one left there; to signal a
+ * process outside its sandbox; for the judge's roles, to connect to a local listener; and to open the Mac's GPU, which
  * only the timing roles and a lane's runs on the device may. Every probe must come out as the
  * fence promises, or the report fails. The fence's two gaps (no per-run process limit, no CPU
  * pinning) are listed as not checked.
@@ -89,6 +90,17 @@ async function buildProbe(dir: string): Promise<string | undefined> {
   return `the Metal probe did not build: ${last}`;
 }
 
+/** The user's temporary folder and Metal cache (broker/seatbelt.ts closes both to every role). */
+async function sharedDirs(): Promise<string[]> {
+  const dir = async (name: string) =>
+    realpathSync(
+      (await run("getconf", [name], { encoding: "utf8", timeout: 10_000 })).stdout.trim(),
+    );
+  const cache = join(await dir("DARWIN_USER_CACHE_DIR"), "com.apple.metal");
+  mkdirSync(cache, { recursive: true });
+  return [await dir("DARWIN_USER_TEMP_DIR"), cache];
+}
+
 export async function seatbeltSelftest(o: {
   runner: Runner;
   stateDir: string;
@@ -114,6 +126,12 @@ export async function seatbeltSelftest(o: {
   writeFileSync(foreignFile, "another role's folder\n");
   await o.runner.handOver(join(root, "foreign"), "agent-16");
   const unbuilt = await buildProbe(join(root, "bin"));
+  // The user's shared folders, every role's alike: a file left there by another role (here, the
+  // harness), which no role may read, and where no role may write.
+  const shared = await sharedDirs();
+  const left = shared.map((d) => join(d, `thermite-selftest-${process.pid}-left`));
+  for (const f of left) writeFileSync(f, "left by another role\n");
+  const tag = `thermite-selftest-${process.pid}`;
 
   const listener = createServer((s) => s.end());
   await new Promise<void>((done) => listener.listen(0, "127.0.0.1", done));
@@ -166,6 +184,16 @@ export async function seatbeltSelftest(o: {
       results["write-own"] = (await probe(write(join(dir, "written")))).ok
         ? "ok"
         : "failed: could not write its own folder";
+      let channel = "refused";
+      for (const [i, d] of shared.entries()) {
+        const mine = join(d, `${tag}-${r.label.replace(/\W+/g, "-")}`);
+        if ((await probe(write(mine))).ok) channel = `ALLOWED: wrote in the shared folder ${d}`;
+        else if ((await probe(["/bin/cat", left[i] as string])).ok)
+          channel = `ALLOWED: read another role's file in the shared folder ${d}`;
+        rmSync(mine, { force: true });
+        if (channel !== "refused") break;
+      }
+      results["shared-temp"] = channel;
       results.signal = await refused("signalled a process outside its sandbox", [
         "/bin/sh",
         "-c",
@@ -200,6 +228,7 @@ export async function seatbeltSelftest(o: {
     await o.runner.remove(root).catch(() => undefined);
     rmSync(stateProbe, { recursive: true, force: true });
     rmSync(kitProbe, { recursive: true, force: true });
+    for (const f of left) rmSync(f, { force: true });
   }
   const ok = Object.values(roles).every((r) => Object.values(r).every((v) => !isFailure(v)));
   return { ok, devices: "metal (Seatbelt fence)", roles, skipped: [...SEATBELT_GAPS] };

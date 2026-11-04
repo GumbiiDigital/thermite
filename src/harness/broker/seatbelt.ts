@@ -12,10 +12,11 @@ import { LocalRunner, type Role, RunRequest } from "./runner.ts";
  * the command and every process it starts, and none of them can lift it. All roles run as the
  * same user, so the fence is the only line between them (`separated` stays false):
  *
- * - reads: never the rig's state, the scratch area, the secrets' folders or the user's home, except
- *   the run's own folder, the folders handed to its role, and what its role must read by design;
- * - writes: only the run's own folder, the folders handed to its role, /dev/null, /dev/tty and the
- *   user's Metal cache and temporary folder;
+ * - reads: never the rig's state, the scratch area, the secrets' folders, the user's home, or the
+ *   user's shared temporary folder and Metal cache, except the run's own folder, the folders
+ *   handed to its role, and what its role must read by design;
+ * - writes: only the run's own folder (also its TMPDIR), the folders handed to its role,
+ *   /dev/null and /dev/tty; never the user's shared temporary folder or Metal cache;
  * - the judge's roles (builder, run, checker, driver, on every card) have no network;
  * - no signal and no process information leaves the run's own sandbox;
  * - only the timing roles and a lane's runs on the device open the GPU (the macOS form of the
@@ -49,7 +50,7 @@ export interface FencePlaces {
   runtime: string[];
   /** What the agents' roles may read too: Thermite's checkout, whose code they run. */
   agentRuntime: string[];
-  /** Metal's shader cache and the user's temporary folder (getconf DARWIN_USER_*_DIR). */
+  /** Metal's shader cache and the user's temporary folder (getconf DARWIN_USER_*_DIR): no role's. */
   metalCache: string;
   userTemp: string;
 }
@@ -97,7 +98,10 @@ function checked(path: string): string {
  */
 function namedPaths(run: FenceRun, p: FencePlaces): { path: string; dir: boolean }[] {
   const stateDir = real(p.stateDir);
-  const guarded = [stateDir, real(p.scratchDir), real(p.home), ...p.secretDirs.map(real)];
+  const secrets = p.secretDirs.map(real);
+  const fenced = [real(p.scratchDir), real(p.home), real(p.userTemp), real(p.metalCache)];
+  const guarded = [stateDir, ...fenced, ...secrets];
+  const runsDir = join(real(p.scratchDir), "runs");
   const kinds = /^checker(-[1-7])?$/.test(run.role)
     ? ["builds", "kits", "models"]
     : ["builds", "models"];
@@ -105,12 +109,21 @@ function namedPaths(run: FenceRun, p: FencePlaces): { path: string; dir: boolean
   for (const arg of run.argv) {
     if (!arg.startsWith("/") || !existsSync(arg)) continue;
     let path = real(arg);
-    if (inside(path, stateDir) && path !== stateDir) {
+    const inState = inside(path, stateDir) && path !== stateDir;
+    if (inState) {
       const [kind, name] = path.slice(stateDir.length + 1).split(sep);
       if (!kind || !kinds.includes(kind)) continue;
       path = join(stateDir, kind, name ?? "");
     }
     if (guarded.some((g) => inside(g, path))) continue;
+    // Inside a secret's folder, the home, the shared temporary folder or Metal cache, or the
+    // scratch area: never.
+    // The state's builds, kits and models (above) are allowed wherever the state lies, and so is
+    // the judge's runs folder (a run's copy of the kit), wherever the scratch area lies.
+    if (!inState) {
+      if (secrets.some((s) => inside(path, s))) continue;
+      if (!inside(path, runsDir) && fenced.some((g) => inside(path, g))) continue;
+    }
     if (run.others.some((o) => inside(path, o) || inside(o, path))) continue;
     out.push({ path, dir: statSync(path).isDirectory() });
   }
@@ -132,6 +145,10 @@ export function seatbeltProfile(
   const judge = JUDGE_ROLE.test(run.role);
   const ownPaths = [run.cwd, ...run.handed];
   const closed = [places.stateDir, places.scratchDir, ...places.secretDirs].map(sub);
+  // The user's temporary folder and Metal cache are every role's (one user): closed to all, so no
+  // run leaves a file there for another role. A run's TMPDIR is its own folder (SeatbeltRunner.spec);
+  // Metal compiles and runs kernels without its cache.
+  const temp = `${sub(places.userTemp)} ${sub(places.metalCache)}`;
   // A checker's baseline folder (judge/context.ts): a baseline job's, in the job's runs folder,
   // read and written; or the run's sealed one, under the state's baselines, read only. Never
   // another place; compared resolved, since the judge may name it by a symlink (/var is /private/var).
@@ -160,12 +177,12 @@ export function seatbeltProfile(
     "(allow default)",
     `(deny file-read* ${sub(places.home)})`,
     ...(runtime.length ? [`(allow file-read* ${runtime.join(" ")})`] : []),
-    `(deny file-read* ${closed.join(" ")})`,
+    `(deny file-read* ${[...closed, temp].join(" ")})`,
     `(allow file-read* ${[...own, ...design, ...named].join(" ")})`,
     ...(parents.length ? [`(allow file-read-metadata ${parents.join(" ")})`] : []),
     "(deny file-write*)",
-    `(allow file-write* (literal "/dev/null") (literal "/dev/tty") ${sub(places.metalCache)} ${sub(places.userTemp)})`,
-    `(deny file-write* ${closed.join(" ")})`,
+    '(allow file-write* (literal "/dev/null") (literal "/dev/tty"))',
+    `(deny file-write* ${[...closed, temp].join(" ")})`,
     `(allow file-write* ${[...own, ...(writing ? design : [])].join(" ")})`,
     ...(judge ? ["(deny network*)"] : []),
     "(deny signal)",
@@ -238,7 +255,12 @@ export class SeatbeltRunner extends LocalRunner {
     );
     return {
       ...s,
-      env: { ...s.env, PATH: this.path(s.env.PATH ?? "") },
+      // TMPDIR is the run's own folder (LocalRunner's default), never the shared one the fence closes.
+      env: {
+        ...s.env,
+        PATH: this.path(s.env.PATH ?? ""),
+        TMPDIR: s.env.TMPDIR && inside(real(s.env.TMPDIR), real(s.cwd)) ? s.env.TMPDIR : s.cwd,
+      },
       fence: [SANDBOX_EXEC, ...params.flatMap((p) => ["-D", p]), "-p", profile],
     };
   }

@@ -129,8 +129,9 @@ A Mac with Apple silicon can judge on its own GPU, through Metal, with the harne
 
 | Promise on Linux | On a Mac, in the Seatbelt profile |
 | --- | --- |
-| A role reads only its own folders, never the ledger, the kits or a secret | Reading the state folder, the scratch area, the secrets' folders and the home is denied; then the run's own folder, the folders handed to its role, and what its role reads by design (a build or a kit its command names, a checker's baseline) are allowed. A folder handed to another role is never allowed |
-| A role writes only its own folders | Writing is denied everywhere but the run's own folder, the folders handed to its role, `/dev/null`, `/dev/tty`, and the user's Metal cache and temporary folder |
+| A role reads only its own folders, never the ledger, the kits or a secret | Reading the state folder, the scratch area, the secrets' folders, the home, and the user's shared temporary folder and Metal cache is denied; then the run's own folder, the folders handed to its role, and what its role reads by design (a build or a kit its command names, a checker's baseline) are allowed. A path a command names inside a secret's folder, the home or a shared folder is never allowed, and neither is a folder handed to another role |
+| A role writes only its own folders | Writing is denied everywhere but the run's own folder, the folders handed to its role, `/dev/null` and `/dev/tty`. A run's `TMPDIR` is its own folder |
+| No role leaves a file for another | All roles are one user, so the user's shared temporary folder and Metal cache would be a channel between them: every role is denied both. Metal compiles and runs kernels without them |
 | The judge's roles have no network | The builder, timing, checker and driver roles get no network on every card; the lanes, agents, planner and model check keep it, to reach the model and the harness |
 | A role can't signal or watch another | Signals and process information don't leave the run's own sandbox |
 | Only the timing users and a lane's development runs open the GPU | Every other role is refused Metal's device (`AGXDeviceUserClient`) |
