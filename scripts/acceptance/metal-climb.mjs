@@ -206,6 +206,8 @@ let api;
 /** @type {DatabaseSync | undefined} */
 let db;
 let ok = false;
+/** The token, kept only to take it out of the harness log's copy. */
+let secret = "";
 /** @type {string[]} */
 const summary = [];
 
@@ -242,6 +244,7 @@ try {
         "set CLAUDE_TOKEN_FILE to a file with a subscription's token, or CLIMB_STAND_IN=1",
       );
     token = readFileSync(file, "utf8").trim();
+    secret = token;
     if (!token) throw new Error("CLAUDE_TOKEN_FILE is empty");
     console.log("model: the Claude subscription in CLAUDE_TOKEN_FILE");
   }
@@ -539,7 +542,8 @@ try {
   await api?.close();
   const logCopy = join(outDir, `metal-climb-${stamp}-harness.log`);
   try {
-    writeFileSync(logCopy, readFileSync(join(root, "harness.log")));
+    const log = readFileSync(join(root, "harness.log"), "utf8");
+    writeFileSync(logCopy, secret ? log.replaceAll(secret, "[token]") : log);
     summary.push(`harness log: ${logCopy}`);
   } catch {
     // No log: the harness never started.
