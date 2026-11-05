@@ -1,0 +1,6 @@
+#!/bin/sh
+# `thermite-trial` for a native Mac rig (THERMITE_FENCE=seatbelt): the Seatbelt runner puts this
+# folder on the agents' PATH. It runs the checkout's own trial-cli.ts with the Node.js on the PATH,
+# which the runner puts first. In the images, containers/thermite-trial runs the built one.
+here=$(cd "$(dirname "$0")" && pwd)
+exec node --experimental-strip-types --disable-warning=ExperimentalWarning "$here/../trial-cli.ts" "$@"

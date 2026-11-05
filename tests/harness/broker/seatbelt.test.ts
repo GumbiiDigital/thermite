@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import {
+  agentCliInstalls,
   type FencePlaces,
   SANDBOX_EXEC,
   SeatbeltRunner,
@@ -131,6 +132,86 @@ describe("the Seatbelt profile", () => {
         assert.ok(!lines.some((l) => l.startsWith("(allow") && l.includes(ref)), role);
       }
     }
+  });
+
+  test("the agents' roles read an agent program's installation; the judge's roles never", () => {
+    const install = "/home/user/Apps/Claude.app";
+    const places = { ...PLACES, agentRuntime: [...PLACES.agentRuntime, install] };
+    const reads = (role: string) => {
+      const { profile, params } = seatbeltProfile({ ...RUN, role }, places);
+      const name = params.find((p) => p.endsWith("/user/Apps/Claude.app"))?.split("=")[0];
+      const allow = profile.split("\n").find((l) => l.startsWith("(allow file-read* "));
+      return name !== undefined && (allow?.includes(`(param "${name}")`) ?? false);
+    };
+    for (const role of ["lane-1", "agent-2", "planner", "model-check"])
+      assert.ok(reads(role), role);
+    for (const role of ["builder", "run", "checker-1", "driver"]) assert.ok(!reads(role), role);
+    // Read only: no write rule names it.
+    const { profile, params } = seatbeltProfile({ ...RUN, role: "lane-1" }, places);
+    const name = params.find((p) => p.endsWith("/user/Apps/Claude.app"))?.split("=")[0];
+    assert.ok(
+      !profile
+        .split("\n")
+        .some((l) => l.startsWith("(allow file-write*") && l.includes(`(param "${name}")`)),
+    );
+  });
+
+  test("an agent program's installation: its version's app bundle, npm package or file; never its settings or the home", () => {
+    const top = realpathSync(mkdtempSync(join(tmpdir(), "thermite-cli-")));
+    const at = (...p: string[]) => join(top, ...p);
+    const file = (p: string) => {
+      mkdirSync(join(p, ".."), { recursive: true });
+      writeFileSync(p, "#!/bin/sh\n");
+    };
+    const home = at("home");
+    // Claude Code in an app bundle, named by its setting through a symlink.
+    const app = at("home", "Library", "Claude", "2.1.0", "claude.app");
+    file(join(app, "Contents", "MacOS", "claude"));
+    mkdirSync(at("home", "bin"), { recursive: true });
+    symlinkSync(join(app, "Contents", "MacOS", "claude"), at("home", "bin", "claude-link"));
+    // The Codex CLI as an npm package, found on the PATH by its name.
+    const pkg = at("prefix", "lib", "node_modules", "@openai", "codex");
+    file(join(pkg, "bin", "codex.js"));
+    mkdirSync(at("prefix", "bin"), { recursive: true });
+    symlinkSync(join(pkg, "bin", "codex.js"), at("prefix", "bin", "codex"));
+    // A single-file version on the PATH by its name.
+    const version = at("home", ".local", "share", "claude", "versions", "2.1.1");
+    file(version);
+    mkdirSync(at("home", ".local", "bin"), { recursive: true });
+    symlinkSync(version, at("home", ".local", "bin", "claude"));
+    assert.deepEqual(
+      agentCliInstalls(
+        {
+          THERMITE_CLAUDE_BIN: at("home", "bin", "claude-link"),
+          PATH: [at("home", ".local", "bin"), at("prefix", "bin")].join(":"),
+        },
+        home,
+      ),
+      [app, version, pkg],
+    );
+    // Its settings and credentials folders, and the home itself: never.
+    file(at("home", ".claude", "local", "node_modules", "@anthropic-ai", "claude-code", "cli.js"));
+    assert.deepEqual(
+      agentCliInstalls(
+        {
+          THERMITE_CLAUDE_BIN: at(
+            "home",
+            ".claude",
+            "local",
+            "node_modules",
+            "@anthropic-ai",
+            "claude-code",
+            "cli.js",
+          ),
+          THERMITE_CODEX_BIN: "/no/such/codex",
+          PATH: "",
+        },
+        home,
+      ),
+      [],
+    );
+    // Nothing set and nothing on the PATH: nothing.
+    assert.deepEqual(agentCliInstalls({ PATH: at("nowhere") }, home), []);
   });
 
   test("refuses a path with a quote or a backslash", () => {

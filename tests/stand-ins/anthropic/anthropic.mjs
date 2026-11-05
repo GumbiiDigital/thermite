@@ -102,8 +102,12 @@ export function reply(body) {
   return { content: [{ type: "text", text: "ok" }], stop: "end_turn" };
 }
 
-/** Starts the stand-in on 127.0.0.1:PORT; `seen` counts the requests by how they signed in. */
+/**
+ * Starts the stand-in on 127.0.0.1:PORT (or `o.port`); `seen` counts the requests by how they
+ * signed in. `o.reply` plays another model in place of `reply` (scripts/acceptance/metal-climb.mjs).
+ */
 export function startAnthropicStandIn(o) {
+  const answer = o.reply ?? reply;
   const seen = { signedIn: 0, other: 0, withTools: 0 };
   let n = 0;
   const server = createServer((req, res) => {
@@ -134,7 +138,7 @@ export function startAnthropicStandIn(o) {
           .end(JSON.stringify({ input_tokens: 10 }));
       if (req.method !== "POST" || path !== "/v1/messages") return fail(404, "not here");
       if (body.tools?.length) seen.withTools++;
-      const r = reply(body);
+      const r = answer(body);
       const id = `msg_${++n}`;
       const model = body.model ?? "claude-stand-in";
       if (!body.stream)
@@ -190,7 +194,7 @@ export function startAnthropicStandIn(o) {
     });
   });
   return new Promise((resolve) => {
-    server.listen(PORT, "127.0.0.1", () =>
+    server.listen(o.port ?? PORT, "127.0.0.1", () =>
       resolve({ seen, close: () => new Promise((r) => server.close(() => r())) }),
     );
   });

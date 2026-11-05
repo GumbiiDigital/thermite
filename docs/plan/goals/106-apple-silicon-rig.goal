@@ -46,6 +46,7 @@ None yet.
 
 - 2026-10-23: Goal written as a plan, from the owner's words.
 - 2026-11-04: A prototype of the judge on a Mac's GPU, natively, with no container, VM or root: the `metal-gpu` target driver (`src/harness/targets/metal.ts`), the Seatbelt fence (`THERMITE_FENCE=seatbelt`), the macOS isolation self-test, the Metal smoke kit (`kits/smoke-metal`, `examples/smoke-metal-project`) and the Metal acceptance (`npm run acceptance:metal`). Not built: setup from the install or Add a rig, a rig of control's on a Mac, and an MLX kit.
+- 2026-11-05: Agents natively on a Mac: the Seatbelt fence lets the agents' roles read Claude Code's or the Codex CLI's installation (never `~/.claude` or `~/.codex`), puts the checkout's `thermite-trial` on their `PATH` and Claude Code's temporary files in the run's own folder. `npm run acceptance:metal-climb` runs a hill climb with one Claude Code lane, headless, judged on the GPU; with the Anthropic stand-in it ran three trials, three attempts and three verdicts, the first a confirmed win promoted.
 
 ---
 

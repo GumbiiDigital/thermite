@@ -14,7 +14,8 @@ import { LocalRunner, type Role, RunRequest } from "./runner.ts";
  *
  * - reads: never the rig's state, the scratch area, the secrets' folders, the user's home, or the
  *   user's shared temporary folder and Metal cache, except the run's own folder, the folders
- *   handed to its role, and what its role must read by design;
+ *   handed to its role, and what its role must read by design (for the agents' roles, the
+ *   installation of Claude Code or the Codex CLI, read only, never their settings in the home);
  * - writes: only the run's own folder (also its TMPDIR), the folders handed to its role,
  *   /dev/null and /dev/tty; never the user's shared temporary folder or Metal cache;
  * - the judge's roles (builder, run, checker, driver, on every card) have no network;
@@ -38,6 +39,8 @@ const JUDGE_ROLE = /^(builder|run|checker|driver)(-[1-7])?$/;
 const GPU_ROLE = /^(run(-[1-7])?|lane-\d+-dev)$/;
 /** The Thermite checkout (src/harness/broker/ is three folders down): the agents' code. */
 const CHECKOUT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+/** The folder of the checkout's `thermite-trial` launcher, for the agents' roles' PATH. */
+const TRIAL_BIN = join(CHECKOUT, "src", "harness", "agents", "bin");
 
 /** The places a profile is made from, the same for every run of one runner. */
 export interface FencePlaces {
@@ -48,7 +51,10 @@ export interface FencePlaces {
   home: string;
   /** What every role may read although it lies in the home: Node.js's own installation. */
   runtime: string[];
-  /** What the agents' roles may read too: Thermite's checkout, whose code they run. */
+  /**
+   * What the agents' roles may read too: Thermite's checkout, whose code they run, and the
+   * installations of the agent programs the rig may run (agentCliInstalls).
+   */
   agentRuntime: string[];
   /** Metal's shader cache and the user's temporary folder (getconf DARWIN_USER_*_DIR): no role's. */
   metalCache: string;
@@ -199,6 +205,46 @@ function userDir(name: string): string {
   return real(execFileSync("getconf", [name], { encoding: "utf8", timeout: 10_000 }).trim());
 }
 
+/** The agent programs whose installation the agents' roles read: their setting, then their name. */
+const AGENT_CLIS = [
+  ["THERMITE_CLAUDE_BIN", "claude"],
+  ["THERMITE_CODEX_BIN", "codex"],
+] as const;
+
+/** A program's file: a path as given, else the first file of that name on the PATH. */
+function which(bin: string, path: string): string | undefined {
+  if (bin.includes("/")) return existsSync(bin) ? bin : undefined;
+  for (const d of path.split(delimiter))
+    if (d.startsWith("/") && existsSync(join(d, bin))) return join(d, bin);
+  return undefined;
+}
+
+/**
+ * The installations of the agent programs the rig may run (Claude Code, the Codex CLI), which the
+ * agents' roles read although they may lie in the home: for each, the file its setting names
+ * (THERMITE_CLAUDE_BIN, THERMITE_CODEX_BIN) and the one of its name on the harness's PATH, symlinks
+ * resolved, then its version's whole installation: an app bundle (`X.app`), an npm package
+ * (`node_modules/[@scope/]name`) or else the file alone. Never the program's own settings and
+ * credentials in the home (~/.claude, ~/.codex), nor the home itself.
+ */
+export function agentCliInstalls(env: NodeJS.ProcessEnv, home: string): string[] {
+  const own = [".claude", ".codex"].map((d) => join(real(home), d));
+  const out = new Set<string>();
+  for (const [setting, name] of AGENT_CLIS)
+    for (const bin of [env[setting], name]) {
+      const found = bin ? which(bin, env.PATH ?? "") : undefined;
+      if (!found) continue;
+      const file = real(found);
+      const app = /^(.+?\.app)\/Contents\/MacOS\/[^/]+$/.exec(file)?.[1];
+      const pkg = /^(.*\/node_modules\/(?:@[^/]+\/)?[^/]+)\//.exec(file)?.[1];
+      const install = app ?? pkg ?? file;
+      if (inside(real(home), install) || own.some((o) => inside(install, o) || inside(o, install)))
+        continue;
+      out.add(install);
+    }
+  return [...out];
+}
+
 /** The places of a runner's fence, from its folders and the harness's environment. */
 function fencePlaces(o: {
   stateDir: string;
@@ -216,7 +262,7 @@ function fencePlaces(o: {
     secretDirs: [...new Set(secretDirs.map(real))],
     home: real(homedir()),
     runtime: [node],
-    agentRuntime: [real(CHECKOUT)],
+    agentRuntime: [real(CHECKOUT), ...agentCliInstalls(o.env, homedir())],
     metalCache: join(userDir("DARWIN_USER_CACHE_DIR"), "com.apple.metal"),
     userTemp: userDir("DARWIN_USER_TEMP_DIR"),
   };
@@ -253,13 +299,17 @@ export class SeatbeltRunner extends LocalRunner {
       },
       this.places,
     );
+    // TMPDIR is the run's own folder (LocalRunner's default), never the shared one the fence closes.
+    const tmp = s.env.TMPDIR && inside(real(s.env.TMPDIR), real(s.cwd)) ? s.env.TMPDIR : s.cwd;
     return {
       ...s,
-      // TMPDIR is the run's own folder (LocalRunner's default), never the shared one the fence closes.
       env: {
         ...s.env,
-        PATH: this.path(s.env.PATH ?? ""),
-        TMPDIR: s.env.TMPDIR && inside(real(s.env.TMPDIR), real(s.cwd)) ? s.env.TMPDIR : s.cwd,
+        PATH: this.path(s.env.PATH ?? "", !JUDGE_ROLE.test(req.role)),
+        TMPDIR: tmp,
+        // Claude Code keeps its commands' files in /tmp/claude-<uid> whatever TMPDIR says, and the
+        // fence lets no run write /tmp: in an agents' role, the run's own temporary folder instead.
+        ...(JUDGE_ROLE.test(req.role) ? {} : { CLAUDE_CODE_TMPDIR: tmp }),
       },
       fence: [SANDBOX_EXEC, ...params.flatMap((p) => ["-D", p]), "-p", profile],
     };
@@ -268,9 +318,10 @@ export class SeatbeltRunner extends LocalRunner {
   /**
    * The run's PATH: Node.js's own folder first (the checker and the agents run `node`), then the
    * folders the fence lets every role read; a folder in the home or the rig's own folders would
-   * only be refused.
+   * only be refused. An agents' role also gets the checkout's `thermite-trial` (TRIAL_BIN), which
+   * the images install in /usr/local/bin.
    */
-  private path(from: string): string {
+  private path(from: string, agent: boolean): string {
     const closed = [
       this.places.home,
       this.places.stateDir,
@@ -280,7 +331,8 @@ export class SeatbeltRunner extends LocalRunner {
     const kept = from
       .split(delimiter)
       .filter((d) => d.startsWith("/") && !closed.some((c) => inside(real(d), c)));
-    return [join(this.places.runtime[0] as string, "bin"), ...kept].join(delimiter);
+    const node = join(this.places.runtime[0] as string, "bin");
+    return [node, ...(agent ? [TRIAL_BIN] : []), ...kept].join(delimiter);
   }
 
   override async handOver(path: string, role?: Role): Promise<void> {

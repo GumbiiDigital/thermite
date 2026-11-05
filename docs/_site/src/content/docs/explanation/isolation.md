@@ -129,7 +129,7 @@ A Mac with Apple silicon can judge on its own GPU, through Metal, with the harne
 
 | Promise on Linux | On a Mac, in the Seatbelt profile |
 | --- | --- |
-| A role reads only its own folders, never the ledger, the kits or a secret | Reading the state folder, the scratch area, the secrets' folders, the home, and the user's shared temporary folder and Metal cache is denied; then the run's own folder, the folders handed to its role, and what its role reads by design (a build or a kit its command names, a checker's baseline) are allowed. A path a command names inside a secret's folder, the home or a shared folder is never allowed, and neither is a folder handed to another role |
+| A role reads only its own folders, never the ledger, the kits or a secret | Reading the state folder, the scratch area, the secrets' folders, the home, and the user's shared temporary folder and Metal cache is denied; then the run's own folder, the folders handed to its role, and what its role reads by design (a build or a kit its command names, a checker's baseline) are allowed. A path a command names inside a secret's folder, the home or a shared folder is never allowed, and neither is a folder handed to another role. The lanes, agents, planner and model check also read the installation of Claude Code and the Codex CLI, read only (below) |
 | A role writes only its own folders | Writing is denied everywhere but the run's own folder, the folders handed to its role, `/dev/null` and `/dev/tty`. A run's `TMPDIR` is its own folder |
 | No role leaves a file for another | All roles are one user, so the user's shared temporary folder and Metal cache would be a channel between them: every role is denied both. Metal compiles and runs kernels without them |
 | The judge's roles have no network | The builder, timing, checker and driver roles get no network on every card; the lanes, agents, planner and model check keep it, to reach the model and the harness |
@@ -137,6 +137,8 @@ A Mac with Apple silicon can judge on its own GPU, through Metal, with the harne
 | Only the timing users and a lane's development runs open the GPU | Every other role is refused Metal's device (`AGXDeviceUserClient`) |
 
 In Seatbelt's rules the last one that matches wins, so each part of a profile denies broadly and then allows what the run needs; a test checks this on a Mac. The macOS isolation self-test probes each promise as each role, and fails when one does not hold.
+
+The agents run natively too. Claude Code or the Codex CLI is often installed in the home, which the fence closes, so the agents' roles may read the installation of each one the rig may run, and never the judge's roles. The harness finds it from `THERMITE_CLAUDE_BIN` or `THERMITE_CODEX_BIN` and from `claude` or `codex` on its `PATH`. It resolves symbolic links, then opens that version's whole installation: an app bundle (`X.app`), an npm package, or else the one file. A shell script that finds the program somewhere else in the home can't run in the fence: point `THERMITE_CLAUDE_BIN` at the program itself. The program's own settings and sign-ins in the home, `~/.claude` and `~/.codex`, stay closed, and so does the home itself. An agents' role also finds `thermite-trial` on its `PATH`, from the Thermite checkout, as the images install it in `/usr/local/bin`. Claude Code keeps its commands' files in the run's own folder (`CLAUDE_CODE_TMPDIR`), since the fence lets no run write `/tmp`.
 
 Two promises have no macOS form, and the self-test lists them as not checked:
 
