@@ -322,7 +322,7 @@ Each kit multiplies two square matrices of floats, many times over (`reps`), so 
 
 | | `smoke-cpu` | `smoke-cuda` | `smoke-metal` |
 | --- | --- | --- | --- |
-| Cases (`n`) | `small` 128, `large` 256, `held` 192 | `small` 512, `large` 1024, `held` 768 | as `smoke-cuda`, with the same inputs |
+| Cases (`n`) | `small` 128, `large` 256, `held` 192 | `small` 512, `large` 1024, `held` 768 | as `smoke-cuda`, with the same seeds, and 20 times the reps (20000, 3000 and 6000): its driver queues every rep on the GPU without waiting between them, so a fast kernel's time is not mostly the start of the process |
 | Metric | `flops_per_s` (FLOP/s) | `flops_per_s` (FLOP/s) | `flops_per_s` (FLOP/s) |
 | Build limits | 120 s, 1024 MiB memory, 256 MiB disk | 300 s, 2048 MiB memory, 512 MiB disk | as `smoke-cuda` |
 | Run limits | 60 s, 256 MiB memory, 32 MiB disk | 120 s, 2048 MiB memory, 64 MiB disk | as `smoke-cuda` |

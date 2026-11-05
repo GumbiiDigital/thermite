@@ -1,7 +1,8 @@
 /*
  * Metal smoke kit benchmark driver (from the kit; candidates cannot change it). It runs the
  * fixed work for one cell on the Mac's GPU, then writes the result with the dispatch counter.
- * The judge times the whole process from outside.
+ * The judge times the whole process from outside, so the reps queue on the GPU without a wait
+ * between them: the time is the kernel's, not the CPU's round trip after every rep.
  *
  * usage: bench <params-file> <out-dir>
  */
@@ -65,19 +66,47 @@ int main(int argc, char **argv) {
     for (int i = 0; i < n * n; i++) ha[i] = lcg();
     for (int i = 0; i < n * n; i++) hb[i] = lcg();
     /* Every rep changes one input element, so no rep's result can be reused for another. The
-       buffers are shared with the GPU, and each rep waits for its work, so the write is safe. */
-    for (long r = 0; r < reps; r++) {
+       new values come from the same sequence, in the same order, as before: A, B, then one per
+       rep. They are made here, before any rep runs, into a buffer of the kit's own, and each
+       rep's command buffer starts with a copy of its value into A on the GPU. The CPU never
+       writes A while reps run. */
+    id<MTLBuffer> values = [device newBufferWithLength:sizeof(float) * (NSUInteger)(reps > 0 ? reps : 1)
+                                               options:MTLResourceStorageModeShared];
+    if (!values) return 3;
+    float *hv = (float *)values.contents;
+    for (long r = 0; r < reps; r++) hv[r] = lcg();
+    /* The reps are committed without waiting. Up to WINDOW command buffers are in flight (the
+       queue may hold fewer): rep r waits for rep r - WINDOW first, which caps the memory they
+       hold without draining the GPU. Every command buffer is checked for an error once it has
+       completed. */
+    enum { WINDOW = 256 };
+    id<MTLCommandBuffer> ring[WINDOW] = {nil};
+    for (long r = 0; r < reps + WINDOW; r++) {
       @autoreleasepool {
+        /* Rep r - WINDOW's slot: wait for it and check it. The last WINDOW turns only wait and
+           check, so every rep has completed and been checked before the result is read. */
+        id<MTLCommandBuffer> done = ring[r % WINDOW];
+        if (done) {
+          [done waitUntilCompleted];
+          if (done.error) {
+            fprintf(stderr, "rep %ld: %s\n", r - WINDOW, done.error.localizedDescription.UTF8String);
+            return 5;
+          }
+          ring[r % WINDOW] = nil;
+        }
+        if (r >= reps) continue;
         long at = (r * 7919) % ((long)n * n);
-        ha[at] = lcg();
         id<MTLCommandBuffer> cb = [queue commandBuffer];
+        id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+        [blit copyFromBuffer:values
+                 sourceOffset:sizeof(float) * (NSUInteger)r
+                     toBuffer:a
+            destinationOffset:sizeof(float) * (NSUInteger)at
+                         size:sizeof(float)];
+        [blit endEncoding];
         matmul(cb, a, b, c, n);
         [cb commit];
-        [cb waitUntilCompleted];
-        if (cb.error) {
-          fprintf(stderr, "rep %ld: %s\n", r, cb.error.localizedDescription.UTF8String);
-          return 5;
-        }
+        ring[r % WINDOW] = cb;
       }
     }
 
