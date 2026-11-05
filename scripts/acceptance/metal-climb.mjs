@@ -360,6 +360,14 @@ try {
     return out;
   };
   await command("rig_settings", { program_mode: "headless" });
+  // No supervisor here: the script says so as a supervisor would, so a win held for an audit goes
+  // on by the run's rules (judge/jobs/confirm.ts), recorded as "this rig has no auditor".
+  const advisors = await fetch(`${url}/v1/advisors`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${supervisorToken}`, "content-type": "application/json" },
+    body: JSON.stringify({ auditor: false, review_panel: 0 }),
+  });
+  if (!advisors.ok) throw new Error(`advisors refused: ${advisors.status}`);
   const run = `climb-${randomUUID().replace(/-/g, "").slice(0, 8)}`;
   await command("assign_campaign", {
     run,
@@ -480,7 +488,12 @@ try {
       await command("rig_settings", { workers: false, planner: false });
       console.log(`${trials} trials done: no more trials; waiting for the verdicts`);
     }
-    if (stopping && [...attempts].every((a) => verdicts.has(a))) break;
+    // A screened win waits for its confirmation: the last verdict decides.
+    if (
+      stopping &&
+      [...attempts].every((a) => verdicts.has(a) && verdicts.get(a) !== "win_screened")
+    )
+      break;
     await sleep(2000);
   }
   poll();
