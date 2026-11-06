@@ -11,7 +11,8 @@
       ".kit/bench/build.sh"
     ],
     "outputs": [
-      "out/bench"
+      "out/bench",
+      "out/default.metallib"
     ],
     "timeout_s": 900,
     "rss_mib": 8192,

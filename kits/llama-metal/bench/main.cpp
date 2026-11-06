@@ -70,8 +70,10 @@ long intParam(const std::map<std::string, std::string>& p, const char* key, long
   return v;
 }
 
+// Errors only, and the one line that says where ggml loaded its Metal kernels from.
 void quietLog(enum ggml_log_level level, const char* text, void*) {
-  if (level == GGML_LOG_LEVEL_ERROR) std::fputs(text, stderr);
+  if (level == GGML_LOG_LEVEL_ERROR || std::strstr(text, "metallib") || std::strstr(text, "from source"))
+    std::fputs(text, stderr);
 }
 
 struct Record {
@@ -125,6 +127,21 @@ int main(int argc, char** argv) {
   std::stringstream textBuf;
   textBuf << textIn.rdbuf();
   const std::string text = textBuf.str();
+
+  // The kernels are compiled at build time (build.sh). ggml looks for default.metallib beside the
+  // program (the folder of argv[0]); without it, ggml would compile the kernels' source at
+  // start-up, seconds in every run, so a run without it fails instead.
+  {
+    std::string self = argv[0];
+    const auto slash = self.rfind('/');
+    const std::string lib = (slash == std::string::npos ? std::string(".") : self.substr(0, slash)) +
+                            "/default.metallib";
+    if (!std::ifstream(lib, std::ios::binary)) fail(2, "the Metal kernels are missing: " + lib);
+  }
+#if !KIT_METAL_TENSOR
+  // The library has no tensor-API kernels, so ggml must not ask for them.
+  setenv("GGML_METAL_TENSOR_DISABLE", "1", 1);
+#endif
 
   llama_log_set(quietLog, nullptr);
   llama_backend_init();
