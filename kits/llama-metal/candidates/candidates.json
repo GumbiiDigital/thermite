@@ -1,0 +1,5 @@
+{
+  "noop": { "hypothesis": "reword a comment in the RMS norm kernel", "expect": "neutral" },
+  "broken": { "hypothesis": "halve the RMS norm's scale", "expect": "invalid" },
+  "slow": { "hypothesis": "dispatch every matrix product twice", "expect": "regress" }
+}

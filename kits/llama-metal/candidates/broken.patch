@@ -1,0 +1,13 @@
+diff --git a/ggml/src/ggml-metal/ggml-metal.metal b/ggml/src/ggml-metal/ggml-metal.metal
+index 2bd310d94..eb27b1efa 100644
+--- a/ggml/src/ggml-metal/ggml-metal.metal
++++ b/ggml/src/ggml-metal/ggml-metal.metal
+@@ -3096,7 +3096,7 @@ kernel void kernel_rms_norm_fuse_impl(
+     sumf = simd_sum(sumf);
+
+     const float mean  = sumf/args.ne00;
+-    const float scale = 1.0f/sqrt(mean + args.eps);
++    const float scale = 0.5f/sqrt(mean + args.eps);
+
+     device T * y = (device T *) (dst + i03*args.nb3 + i02*args.nb2 + i01*args.nb1);
+     for (int i00 = tpitg.x; i00 < args.ne00_t; i00 += ntg.x) {

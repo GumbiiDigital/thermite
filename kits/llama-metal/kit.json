@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "name": "llama-metal",
+  "target": "metal-gpu",
+  "build": {
+    "copy": [
+      "bench"
+    ],
+    "command": [
+      "sh",
+      ".kit/bench/build.sh"
+    ],
+    "outputs": [
+      "out/bench"
+    ],
+    "timeout_s": 900,
+    "rss_mib": 8192,
+    "disk_mib": 2048
+  },
+  "cells": {
+    "decode": {
+      "mode": "decode",
+      "offset": 0,
+      "prompt": 32,
+      "steps": 512,
+      "min_mean_logp": -1.93,
+      "work": 544
+    },
+    "prefill": {
+      "mode": "prefill",
+      "offset": 0,
+      "prompt": 4096,
+      "records": 256,
+      "reps": 3,
+      "stride": 120,
+      "min_mean_logp": -2.0,
+      "work": 12288
+    },
+    "held": {
+      "mode": "decode",
+      "offset": 2000,
+      "prompt": 64,
+      "steps": 384,
+      "min_mean_logp": -2.28,
+      "work": 448
+    }
+  },
+  "run": {
+    "copy": [
+      "text"
+    ],
+    "command": [
+      "{build:out/bench}",
+      "{params}",
+      "{kit:text/corpus.txt}",
+      "{models:5afcdc19ef0a96bccd86b6ce7df9f8aa16cfad8248659fca3653af10b05067cf}",
+      "{out}"
+    ],
+    "timeout_s": 120,
+    "rss_mib": 12288,
+    "disk_mib": 64
+  },
+  "metrics": {
+    "tokens_per_s": {
+      "unit": "tokens/s",
+      "work": "work"
+    }
+  },
+  "check": {
+    "command": [
+      "node",
+      "{kit:check.mjs}",
+      "{params_json}",
+      "{out}"
+    ],
+    "timeout_s": 120
+  }
+}

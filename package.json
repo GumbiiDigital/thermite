@@ -44,6 +44,7 @@
     "acceptance:control": "node scripts/acceptance/control.mjs",
     "acceptance:judge": "node scripts/acceptance/judge.mjs",
     "acceptance:leaf": "node scripts/acceptance/leaf.mjs",
+    "acceptance:llama-metal": "node scripts/acceptance/llama-metal.mjs",
     "acceptance:machine": "node scripts/acceptance/machine.mjs",
     "acceptance:metal": "node scripts/acceptance/metal.mjs",
     "acceptance:metal-climb": "node scripts/acceptance/metal-climb.mjs",

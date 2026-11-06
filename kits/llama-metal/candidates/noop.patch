@@ -1,0 +1,13 @@
+diff --git a/ggml/src/ggml-metal/ggml-metal.metal b/ggml/src/ggml-metal/ggml-metal.metal
+index 2bd310d94..933e92037 100644
+--- a/ggml/src/ggml-metal/ggml-metal.metal
++++ b/ggml/src/ggml-metal/ggml-metal.metal
+@@ -3078,7 +3078,7 @@ kernel void kernel_rms_norm_fuse_impl(
+
+     float sumf = 0.0f;
+
+-    // parallel sum
++    // parallel sum of the squares, each thread over a stride of the row
+     for (int i00 = tpitg.x; i00 < args.ne00_t; i00 += ntg.x) {
+         sumf += dot(x[i00], x[i00]);
+     }

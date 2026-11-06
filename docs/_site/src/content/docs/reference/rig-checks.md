@@ -349,3 +349,29 @@ The details list each candidate with its expected result, its actual result and 
 The `noop` candidate changes nothing that runs, so the judge should find no difference: `neutral`. On a machine whose timing varies a lot from run to run, such as a virtual machine that shares its host, the judge can't tell "no difference" from the noise in the contract's three runs per case, and says `inconclusive`. That is the judge working as it must: it doesn't call a result when its measurements can't support one.
 
 So when the no-op's `inconclusive` is the only wrong result, the check passes, and its summary ends with the note `The timing on this machine is noisy. Results here need more repeats.` The note means that campaigns on this rig need more measurement to tell small effects apart. Raise `acceptance.runs_per_cell` in their contracts (**Runs per case** on the **New campaign** page), or run them on a quieter machine. Any other wrong result still fails the check: a no-op judged `regress` or `win_confirmed`, a known win that is not confirmed, or a broken change that is not caught.
+
+## A real model on a Mac: the llama Metal kit
+
+The smoke kits test the judge on a small kernel. The kit `kits/llama-metal` (target `metal-gpu`) is a real campaign's kit: a hill climb on it makes a language model generate text faster on a Mac's GPU. It is not a rig check; `npm run acceptance:llama-metal` tests it, with its own candidates, on a Mac with Apple silicon.
+
+- **The project** is llama.cpp's source. It was tested at release tag `b9580`, the tag its candidates are patches against. An agent changes llama.cpp, mostly ggml's Metal kernels (`ggml/src/ggml-metal/`).
+- **The build** (`bench/build.sh`) builds llama.cpp's `llama` and `ggml` libraries with CMake (Ninja, or make without it), for Metal, statically, with the kernels embedded as source, so no Metal toolchain is needed. It links them with the kit's own driver (`bench/main.cpp`) into one program, `out/bench`. It tries the SDKs in the order `smoke-metal` does. A cold build takes about 15 s on an M5 Max; the limit is 900 s.
+- **The driver** is the kit's: no agent can change it. It runs the model file the contract lists, `{models:<sha256>}`, over an English text the kit wrote itself (`text/corpus.txt`), with every layer on the GPU, flash attention on, 4 CPU threads and no sampling. At each position it records the argmax token and the log-probability of the text's true next token.
+- **The model** it was tested with is Qwen3.5 9B in GGUF, quantized Q4_K_M (5.8 GB). The kit names it by its SHA-256 in `run.command`; another model needs a copy of the kit with that SHA-256 and new floors.
+- **The metric** is `tokens_per_s`: the tokens a case processes, its `work`, divided by the whole run's time, the model's load included. On an M5 Max the load is about 0.5 s, under a tenth of each case's time.
+
+| Case | What it runs | `work` (tokens) |
+| --- | --- | --- |
+| `decode` | A 32-token prompt, then 512 steps of one token each, every step the text's true token | 544 |
+| `prefill` | A 4,096-token prompt as one batch, 3 times, each a different window of the text (`stride` 120 tokens apart) from an empty memory; the last 256 positions of each are recorded, 768 in all | 12,288 |
+| `held` | As `decode`, from token 2,000 of the text: a 64-token prompt and 384 steps | 448 |
+
+The check (`check.mjs`) fails a run whose records are missing, of the wrong length, not finite or out of range. Without a baseline, as in a goal campaign, it needs the mean log-probability of the true tokens above the case's floor (`min_mean_logp`), set 0.1 below the seed's. In a hill climb, the baseline job keeps the starting point's records in [the check's baseline folder](kit-manifest.md#the-checks-baseline-folder), and each later run must have the same true tokens, an argmax agreement of at least 0.98, and a mean change in log-probability of at most 0.02. When that folder is set but holds no records for the case and cannot be written, the run fails: a hill climb never passes on the floor alone. Its result line has `mean_logp`, `argmax_agree` and `mean_abs_dlogp`. The seed run twice gives the same records, bit for bit. Flash attention turned off, a fair change to how attention is computed, moves the mean log-probability by 0.0001 to 0.0008 and keeps every argmax; the thresholds leave room for kernels that sum in another order. A change that skips work moves it by whole units.
+
+| Candidate | The change | Expected |
+| --- | --- | --- |
+| `noop` | A comment reworded in the RMS norm kernel | `neutral` |
+| `broken` | The RMS norm's scale halved | `invalid` |
+| `slow` | Every matrix product dispatched twice: the same values, written twice | `regress` |
+
+The acceptance needs `THERMITE_LLAMA_MODEL`, the model file, and `THERMITE_LLAMA_SEED`, a clone of llama.cpp with the tag. It imports the file into a throwaway harness as an assignment imports a [model file](model-files.md), so it needs the file's size free twice, and judges a hill climb with the three candidates, as the Metal acceptance does: the same Seatbelt fence and the same refusal to time while the GPU is busier than `METAL_MAX_UTILIZATION` percent.
